@@ -8,6 +8,7 @@ from langchain_text_splitters import (
 )
 from mcp.server.fastmcp import FastMCP
 from chromadb import Settings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 
 
 def load_documents_from_dir(base_dir: str):
@@ -74,8 +75,12 @@ def load_documents_from_dir(base_dir: str):
 
 # 向量库和检索初始化（和 v0.1 一致）
 documents = load_documents_from_dir("./knowledge/local")
-embeddings = DashScopeEmbeddings(model="text-embedding-v1")
-db_path = "./chroma_db"
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-small-zh-v1.5",
+    model_kwargs={"device": "cpu"},
+    encode_kwargs={"normalize_embeddings": True}
+)
+db_path = "./db/knowledge"
 
 
 def setup_vectorstore():

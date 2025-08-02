@@ -3,17 +3,21 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from mcp.server.fastmcp import FastMCP
 from chromadb import Settings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 
-HIST_VEC_PATH = "./history_chroma"
-embeddings = DashScopeEmbeddings(model="text-embedding-v1")
-
+db_path = "./db/chat_histories"
+embeddings = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-small-zh-v1.5",
+    model_kwargs={"device": "cpu"},
+    encode_kwargs={"normalize_embeddings": True}
+)
 
 def setup_history_vectorstore():
     import os
 
-    os.makedirs(HIST_VEC_PATH, exist_ok=True)
+    os.makedirs(db_path, exist_ok=True)
     return Chroma(
-        persist_directory=HIST_VEC_PATH,
+        persist_directory=db_path,
         embedding_function=embeddings,
         client_settings=Settings(anonymized_telemetry=False),
     )

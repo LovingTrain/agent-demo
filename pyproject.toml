@@ -8,7 +8,13 @@ dependencies = [
     "dashscope>=1.24.0",
     "langchain-chroma>=0.2.5",
     "langchain-community>=0.3.27",
+    "langchain-huggingface>=0.3.1",
     "langchain-mcp-adapters>=0.1.9",
     "langchain-openai>=0.3.28",
     "langserve[all]>=0.3.1",
+    "sentence-transformers>=5.0.0",
 ]
+
+[[tool.uv.index]]
+url = "http://mirrors.aliyun.com/pypi/simple/"
+default = true

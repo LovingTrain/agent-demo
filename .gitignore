@@ -10,6 +10,4 @@ wheels/
 .venv
 
 # Data
-/chat_histories
-/history_chroma
-/chroma_db
+/db
