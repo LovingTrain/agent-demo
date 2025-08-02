@@ -1,28 +1,79 @@
-# server.py
+import os
 from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_text_splitters import (
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
 from mcp.server.fastmcp import FastMCP
+from chromadb import Settings
+
+
+def load_documents_from_dir(base_dir: str):
+    docs = []
+    base_dir = os.path.abspath(base_dir)
+
+    # 分割器
+    txt_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    md_header_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "H1"), ("##", "H2"), ("###", "H3")])
+
+    for root, _, files in os.walk(base_dir):
+        for fname in files:
+            fpath = os.path.join(root, fname)
+            if fname.lower().endswith(".txt"):
+                # TXT 文件直接按固定长度切分
+                with open(fpath, encoding="utf-8") as f:
+                    content = f.read()
+                rel_path = os.path.relpath(fpath, base_dir)
+                parts = rel_path.split(os.sep)[:-1]
+                if not parts:
+                    continue
+                source = parts[0]
+                tags = list(dict.fromkeys(parts))
+                # 先分块
+                sub_docs = txt_splitter.create_documents([content])
+                for d in sub_docs:
+                    d.metadata.update({
+                        "source": source,
+                        "tags": ",".join(tags),
+                        "file_path": rel_path,
+                        "file_type": "txt"
+                    })
+                docs.extend(sub_docs)
+
+            elif fname.lower().endswith(".md"):
+                # MD 文件先按章节，再对每章节分块
+                with open(fpath, encoding="utf-8") as f:
+                    content = f.read()
+                rel_path = os.path.relpath(fpath, base_dir)
+                parts = rel_path.split(os.sep)[:-1]
+                if not parts:
+                    continue
+                source = parts[0]
+                tags = list(dict.fromkeys(parts))
+                # 先按标题分章节
+                chapter_docs = md_header_splitter.split_text(content)
+                # 每个章节再切块
+                for chap_doc in chapter_docs:
+                    sub_docs = txt_splitter.create_documents([chap_doc.page_content])
+                    for d in sub_docs:
+                        d.metadata.update({
+                            "source": source,
+                            "tags": ",".join(tags),
+                            "file_path": rel_path,
+                            "file_type": "md",
+                            "header": chap_doc.metadata.get("header", ""),
+                        })
+                    docs.extend(sub_docs)
+
+            # 其他类型可扩展
+
+    return docs
+
 
 # 向量库和检索初始化（和 v0.1 一致）
-documents = [
-    Document(
-        page_content="派蒙喜欢吃蜜酱胡萝卜煎肉", metadata={"source": "character-doc"}
-    ),
-    Document(
-        page_content="元素分为：火、水、冰、雷、风、岩、草，其中火、水、冰、雷属于活性元素...",
-        metadata={"source": "element-doc"},
-    ),
-    Document(page_content="安柏和优菈是拉拉关系", metadata={"source": "character-doc"}),
-    Document(
-        page_content="班尼特的元素爆发会在当前位置释放一个圆形区域...",
-        metadata={"source": "character-doc"},
-    ),
-    Document(
-        page_content="BOSS草龙会释放无法躲避的草属性攻击...",
-        metadata={"source": "boss-doc"},
-    ),
-]
+documents = load_documents_from_dir("./knowledge/local")
 embeddings = DashScopeEmbeddings(model="text-embedding-v1")
 db_path = "./chroma_db"
 
@@ -33,7 +84,11 @@ def setup_vectorstore():
 
     if os.path.exists(db_path):
         try:
-            store = Chroma(persist_directory=db_path, embedding_function=embeddings)
+            store = Chroma(
+                persist_directory=db_path,
+                embedding_function=embeddings,
+                client_settings=Settings(anonymized_telemetry=False),
+            )
             if store._collection.count() != len(documents):
                 raise ValueError("数量不一致，重建 DB")
             return store

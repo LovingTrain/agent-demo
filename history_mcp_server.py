@@ -2,6 +2,7 @@ from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from mcp.server.fastmcp import FastMCP
+from chromadb import Settings
 
 HIST_VEC_PATH = "./history_chroma"
 embeddings = DashScopeEmbeddings(model="text-embedding-v1")
@@ -11,7 +12,11 @@ def setup_history_vectorstore():
     import os
 
     os.makedirs(HIST_VEC_PATH, exist_ok=True)
-    return Chroma(persist_directory=HIST_VEC_PATH, embedding_function=embeddings)
+    return Chroma(
+        persist_directory=HIST_VEC_PATH,
+        embedding_function=embeddings,
+        client_settings=Settings(anonymized_telemetry=False),
+    )
 
 
 history_vectorstore = setup_history_vectorstore()
