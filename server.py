@@ -44,7 +44,7 @@ def find_tool(name):
 
 search_history_tool = find_tool("search_history")
 add_history_tool = find_tool("add_history")
-search_knowledge_tool = find_tool("search_game_knowledge")  # 可选
+search_knowledge_tool = find_tool("search_multimodal_knowledge")  # 可选
 
 # --- 2. LLM & Agent ---
 model = ChatOpenAI(
