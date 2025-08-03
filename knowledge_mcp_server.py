@@ -1,171 +1,82 @@
 import os
-from langchain_community.embeddings import DashScopeEmbeddings
-from langchain_chroma import Chroma
-from langchain_core.documents import Document
-from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
-    RecursiveCharacterTextSplitter,
-)
-from mcp.server.fastmcp import FastMCP
-from chromadb import Settings
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+import qdrant_client
+from llama_index.core import SimpleDirectoryReader, StorageContext
+from llama_index.vector_stores.qdrant import QdrantVectorStore
+from llama_index.core.indices import MultiModalVectorStoreIndex
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+import clip
+from mcp.server.fastmcp import FastMCP  # 保留你的原有服务
+import logging
+
+# ---- 配置 ----
+DATA_DIR = "./knowledge/local"  # 你的知识目录
+QDRANT_PATH = "./db/knowledge"  # Qdrant 本地存储
+TEXT_COLLECTION = "text_collection"
+IMAGE_COLLECTION = "image_collection"
 
 
-def load_documents_from_dir(base_dir: str):
-    docs = []
-    base_dir = os.path.abspath(base_dir)
-
-    # 分割器
-    txt_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    md_header_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "H1"), ("##", "H2"), ("###", "H3")])
-
-    for root, _, files in os.walk(base_dir):
-        for fname in files:
-            fpath = os.path.join(root, fname)
-            if fname.lower().endswith(".txt"):
-                # TXT 文件直接按固定长度切分
-                with open(fpath, encoding="utf-8") as f:
-                    content = f.read()
-                rel_path = os.path.relpath(fpath, base_dir)
-                parts = rel_path.split(os.sep)[:-1]
-                if not parts:
-                    continue
-                source = parts[0]
-                tags = list(dict.fromkeys(parts))
-                # 先分块
-                sub_docs = txt_splitter.create_documents([content])
-                for d in sub_docs:
-                    d.metadata.update({
-                        "source": source,
-                        "tags": ",".join(tags),
-                        "file_path": rel_path,
-                        "file_type": "txt"
-                    })
-                docs.extend(sub_docs)
-
-            elif fname.lower().endswith(".md"):
-                # MD 文件先按章节，再对每章节分块
-                with open(fpath, encoding="utf-8") as f:
-                    content = f.read()
-                rel_path = os.path.relpath(fpath, base_dir)
-                parts = rel_path.split(os.sep)[:-1]
-                if not parts:
-                    continue
-                source = parts[0]
-                tags = list(dict.fromkeys(parts))
-                # 先按标题分章节
-                chapter_docs = md_header_splitter.split_text(content)
-                # 每个章节再切块
-                for chap_doc in chapter_docs:
-                    sub_docs = txt_splitter.create_documents([chap_doc.page_content])
-                    for d in sub_docs:
-                        d.metadata.update({
-                            "source": source,
-                            "tags": ",".join(tags),
-                            "file_path": rel_path,
-                            "file_type": "md",
-                            "header": chap_doc.metadata.get("header", ""),
-                        })
-                    docs.extend(sub_docs)
-
-            # 其他类型可扩展
-
-    return docs
-
-
-# 向量库和检索初始化（和 v0.1 一致）
-documents = load_documents_from_dir("./knowledge/local")
-embeddings = HuggingFaceEmbeddings(
-    model_name="BAAI/bge-small-zh-v1.5",
-    model_kwargs={"device": "cpu"},
-    encode_kwargs={"normalize_embeddings": True}
-)
-db_path = "./db/knowledge"
-
-
-def setup_vectorstore():
-    import os
-    import shutil
-
-    if os.path.exists(db_path):
-        try:
-            store = Chroma(
-                persist_directory=db_path,
-                embedding_function=embeddings,
-                client_settings=Settings(anonymized_telemetry=False),
-            )
-            if store._collection.count() != len(documents):
-                raise ValueError("数量不一致，重建 DB")
-            return store
-        except Exception:
-            shutil.rmtree(db_path)
-    return Chroma.from_documents(
-        documents, embedding=embeddings, persist_directory=db_path
+# ---- 多模态索引准备 ----
+def build_multimodal_index():
+    # 1. 初始化 Qdrant
+    client = qdrant_client.QdrantClient(path=QDRANT_PATH)
+    text_store = QdrantVectorStore(client=client, collection_name=TEXT_COLLECTION)
+    image_store = QdrantVectorStore(client=client, collection_name=IMAGE_COLLECTION)
+    storage_context = StorageContext.from_defaults(
+        vector_store=text_store, image_store=image_store
     )
 
+    # 2. 配置 embeddings
+    clip_embedding, preprocess = clip.load(name="ViT-B/32", device="cuda", jit=False)
+    text_embedding = HuggingFaceEmbedding(model_name="BAAI/bge-small-zh-v1.5")
 
-vectorstore = setup_vectorstore()
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 2})
+    # 3. 自动读取所有文本和图片
+    documents = SimpleDirectoryReader(DATA_DIR, recursive=True).load_data()
+    logging.info(f"已加载 {len(documents)} 个文档（含文本和图片）")
+
+    # 4. 构建索引
+    index = MultiModalVectorStoreIndex.from_documents(
+        documents,
+        embed_model=text_embedding,
+        storage_context=storage_context,
+        show_progress=True,
+    )
+    return index
+
+
+# ---- 检索器和格式化 ----
+def get_multimodal_retriever(index):
+    return index.as_retriever(similarity_top_k=3, image_similarity_top_k=1)
 
 
 def format_docs(docs):
-    return " | ".join(d.page_content for d in docs) if docs else "没有找到相关信息"
+    if not docs:
+        return "没有找到相关信息"
+    lines = []
+    for d in docs:
+        meta = d.metadata
+        path = meta.get("file_path", "")
+        file_type = os.path.splitext(path)[-1].lower()
+        content = d.get_content()
+        if file_type in {".jpg", ".jpeg", ".png"}:
+            lines.append(f"[图片] {path}")
+        else:
+            lines.append(f"[文本] {path}: {content[:100]}...")
+    return "\n".join(lines)
 
 
-m = FastMCP("knowledge", port=9000)
-
-
-@m.tool()
-def search_game_knowledge(query: str) -> str:
-    """搜索游戏知识库中的角色、元素、技能、BOSS 等内容。"""
-    return format_docs(retriever.invoke(query))
-
-
-# Mock 角色面板数据
-雷国_mock数据 = {
-    "队伍": ["雷电将军", "行秋", "香菱", "班尼特"],
-    "示例属性": {
-        "雷电将军": {
-            "等级": 90,
-            "武器": "薙草之稻光",
-            "圣遗物": "绝缘4",
-            "天赋等级": [10, 10, 10],
-        },
-        "行秋": {
-            "等级": 90,
-            "武器": "祭礼剑",
-            "圣遗物": "沉沦4",
-            "天赋等级": [8, 12, 8],
-        },
-        "香菱": {
-            "等级": 90,
-            "武器": "「渔获」",
-            "圣遗物": "绝缘4",
-            "天赋等级": [10, 13, 12],
-        },
-        "班尼特": {
-            "等级": 90,
-            "武器": "风鹰剑",
-            "圣遗物": "宗室4",
-            "天赋等级": [9, 13, 11],
-        },
-    },
-    "备注": "这是经典雷国配队Mock数据，仅供测试",
-}
+# ---- MCP服务集成 ----
+m = FastMCP("multimodal_knowledge", port=9000)
+index = build_multimodal_index()
+retriever = get_multimodal_retriever(index)
 
 
 @m.tool()
-def query_character_by_uid(uid: str) -> str:
-    """根据UID获取角色面板信息（Mock：始终返回雷国队经典配置）"""
-    return str(雷国_mock数据)
-
-
-@m.tool()
-def calc_damage(character_json: str, team: str = "") -> str:
-    """输入角色面板JSON和配队描述，输出预估伤害（Mock版）"""
-    # 只需演示多步串联即可
-    return f"已收到角色面板，配队为：{team if team else '雷国'}。模拟计算总爆发伤害为：153264。"
+def search_multimodal_knowledge(query: str) -> str:
+    """支持文本和图片描述的多模态知识检索"""
+    results = retriever.retrieve(query)
+    return format_docs(results)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     m.run(transport="streamable-http")
