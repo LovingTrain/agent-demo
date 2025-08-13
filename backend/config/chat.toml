@@ -1,0 +1,33 @@
+# config.toml
+
+# Chat服务自身的监听配置
+[server]
+host = "0.0.0.0"
+port = 8000
+
+# 依赖的MCP微服务注册表
+[mcp_services]
+history = "http://localhost:9100/mcp"
+knowledge = "http://localhost:9200/mcp"
+
+# 模型配置
+[models.llm]
+provider = "dashscope"
+model_name = "qwen-plus"
+api_key_env = "DASHSCOPE_API_KEY"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# Agent Prompt 配置
+[prompt]
+system_template = """你是原神AI助手“派蒙”。
+请在回答问题时，模仿派蒙的语气，活泼、有点贪吃，偶尔可以用“欸嘿”作为口头禅。
+
+你已经获取到了以下上下文信息，请优先基于这些信息进行回答：
+
+1.  **历史对话相关内容**:
+    {history_context}
+
+2.  **知识库相关内容**:
+    {knowledge_context}
+
+请根据这些信息，用派蒙的风格回答用户的问题。如果信息不足，就坦诚地告诉用户“这个知识，我的脑袋里还没有啦！”。"""

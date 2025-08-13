@@ -1,16 +1,17 @@
+import logging
 import os
-import qdrant_client
+
+import clip
 from llama_index.core import SimpleDirectoryReader, StorageContext
-from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.core.indices import MultiModalVectorStoreIndex
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-import clip
+from llama_index.vector_stores.qdrant import QdrantVectorStore
 from mcp.server.fastmcp import FastMCP  # 保留你的原有服务
-import logging
+from qdrant_client import QdrantClient
 
 # ---- 配置 ----
 DATA_DIR = "./knowledge/local"  # 你的知识目录
-QDRANT_PATH = "./db/knowledge"  # Qdrant 本地存储
+VECTOR_DB_PATH = "./db/knowledge"  # Qdrant 本地存储
 TEXT_COLLECTION = "text_collection"
 IMAGE_COLLECTION = "image_collection"
 
@@ -18,7 +19,7 @@ IMAGE_COLLECTION = "image_collection"
 # ---- 多模态索引准备 ----
 def build_multimodal_index():
     # 1. 初始化 Qdrant
-    client = qdrant_client.QdrantClient(path=QDRANT_PATH)
+    client = QdrantClient(path=VECTOR_DB_PATH)
     text_store = QdrantVectorStore(client=client, collection_name=TEXT_COLLECTION)
     image_store = QdrantVectorStore(client=client, collection_name=IMAGE_COLLECTION)
     storage_context = StorageContext.from_defaults(
@@ -65,7 +66,7 @@ def format_docs(docs):
 
 
 # ---- MCP服务集成 ----
-m = FastMCP("multimodal_knowledge", port=9000)
+m = FastMCP("multimodal_knowledge", port=9200)
 index = build_multimodal_index()
 retriever = get_multimodal_retriever(index)
 

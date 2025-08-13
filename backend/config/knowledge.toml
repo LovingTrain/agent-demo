@@ -1,0 +1,26 @@
+# config.toml
+
+# 知识库MCP服务的监听配置
+[service]
+host = "0.0.0.0"
+port = 9200
+
+# 模型配置
+[models]
+# 用于文本的嵌入模型
+text_embedding = "BAAI/bge-small-zh-v1.5"
+# 用于图片的多模态模型
+image_embedding = "ViT-B/32"
+# 模型运行设备 ('cuda' or 'cpu')
+device = "cuda"
+
+# 知识库源数据
+[knowledge_source]
+# 包含文本和图片的源文件目录
+data_dir = "./knowledge/local"
+
+# 向量数据库 (Qdrant) 配置
+[vector_db]
+path = "./db/knowledge"
+text_collection = "knowledge_texts"
+image_collection = "knowledge_images"

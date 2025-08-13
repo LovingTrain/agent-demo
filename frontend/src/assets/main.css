@@ -1,0 +1,43 @@
+:root {
+  --bg-color: #1a1a1a;
+  --text-color: #e0e0e0;
+  --primary-color: #4f8aff;
+  --user-msg-bg: #2c3e50;
+  --ai-msg-bg: #252526;
+  --border-color: #3e3e42;
+  --input-bg: #3c3c3c;
+}
+
+html,
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* 其他样式可以从之前的HTML文件中复制过来 */
+pre {
+  background-color: #111;
+  padding: 1rem;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+code {
+  font-family: 'Courier New', Courier, monospace;
+}
+
+.hljs {
+  background: transparent !important;
+}
