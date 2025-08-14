@@ -1,88 +1,105 @@
-# knowledge_service.py
-import logging
-import os
-
+# history_mcp_server.py
 import toml
-from llama_index.core import Settings, StorageContext
-from llama_index.core.indices import MultiModalVectorStoreIndex
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.multi_modal_llms.openai import OpenAIMultiModal
-from llama_index.vector_stores.qdrant import QdrantVectorStore
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import CrossEncoderReranker
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain_core.documents import Document
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from langchain_qdrant import QdrantVectorStore
 from mcp.server.fastmcp import FastMCP
 from qdrant_client import QdrantClient
+from qdrant_client.http import models
 
-# --- 配置与日志 ---
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-config = toml.load("config.toml")
+# 加载配置
+config = toml.load("config/history.toml")
 cfg_service = config["service"]
 cfg_models = config["models"]
 cfg_db = config["vector_db"]
 
+# 初始化模型
+embeddings = HuggingFaceEmbeddings(model_name=cfg_models["embedding"])
+reranker_model = HuggingFaceCrossEncoder(model_name=cfg_models["reranker"])
+compressor = CrossEncoderReranker(model=reranker_model, top_n=3)
 
-def load_retriever_from_qdrant():
-    """从已存在的Qdrant索引加载检索器。"""
-
-    # 1. 连接到已存在的Qdrant数据库
-    client = QdrantClient(path=cfg_db["path"])
-    text_store = QdrantVectorStore(
-        client=client, collection_name=cfg_db["text_collection"]
+# 设置Qdrant向量库
+client = QdrantClient(path=cfg_db["path"])
+collection_name = cfg_db["collection_name"]
+if not client.collection_exists(collection_name=collection_name):
+    print(f"Collection '{collection_name}' does not exist, it will be created now")
+    # 动态获取嵌入向量的维度，避免硬编码
+    vector_size = len(embeddings.embed_query("test"))
+    print(f"Vector size detected: {vector_size}")
+    client.create_collection(
+        collection_name=collection_name,
+        vectors_config=models.VectorParams(
+            size=vector_size, distance=models.Distance.COSINE
+        ),
     )
-    image_store = QdrantVectorStore(
-        client=client, collection_name=cfg_db["image_collection"]
-    )
-    storage_context = StorageContext.from_defaults(
-        vector_store=text_store, image_store=image_store
-    )
+    print(f"✅ Collection '{collection_name}' is created successfully")
+else:
+    print(f"✅ Collection '{collection_name}' already exists")
 
-    # 2. 配置与构建时一致的模型
-    Settings.embed_model = HuggingFaceEmbedding(model_name=cfg_models["text_embedding"])
-    Settings.multi_modal_llm = OpenAIMultiModal(
-        embed_model=cfg_models["image_embedding"], device=cfg_models["device"]
-    )
+history_vectorstore = QdrantVectorStore(
+    client=client,
+    collection_name=cfg_db["collection_name"],
+    embedding=embeddings,
+)
 
-    # 3. 从存储上下文加载索引，不传入documents
-    logging.info("正在从Qdrant加载已存在的索引...")
-    index = MultiModalVectorStoreIndex(
-        nodes=[],  # 传入空列表，表示不添加新文档
-        storage_context=storage_context,
-    )
-
-    # 4. 创建检索器
-    return index.as_retriever(similarity_top_k=3, image_similarity_top_k=1)
-
-
-def format_docs(docs) -> str:
-    """格式化检索结果用于返回"""
-    if not docs:
-        return "(知识库中无相关内容)"
-    lines = []
-    for d in docs:
-        path = d.metadata.get("file_path", "N/A")
-        content = d.get_content(metadata={})
-        if d.metadata.get("file_type") == "image/png":
-            lines.append(f"[图片]: {path}")
-        else:
-            lines.append(f"[文本]: {os.path.basename(path)} - {content[:150]}...")
-    return "\n".join(lines)
-
-
-# --- MCP服务定义 ---
-m = FastMCP("knowledge", port=cfg_service["port"], host=cfg_service["host"])
-retriever = load_retriever_from_qdrant()
-logging.info("✅ 检索器加载完成，服务准备就绪。")
+# 定义MCP服务
+m = FastMCP("history", port=cfg_service["port"], host=cfg_service["host"])
 
 
 @m.tool()
-def search_multimodal_knowledge(query: str) -> str:
-    """在多模态知识库中检索与查询最相关的信息（文本和图片）"""
-    results = retriever.retrieve(query)
-    return format_docs(results)
+def add_history(session_id: str, role: str, message: str) -> str:
+    """将对话历史写入向量库"""
+    try:
+        enriched_content = f"[{role}]: {message}"
+        doc = Document(
+            page_content=enriched_content,
+            metadata={"session_id": session_id, "role": role},
+        )
+        history_vectorstore.add_documents([doc])
+        return "ok"
+    except Exception as e:
+        msg = f"❌ Error: Could not add history to the database. Reason: {e}"
+        print(msg)
+        return msg
+
+
+@m.tool()
+def search_history(session_id: str, query: str, k: int = 3) -> str:
+    """向量检索并重排历史消息"""
+    try:
+        retriever_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="metadata.session_id", match=models.MatchValue(value=session_id)
+                )
+            ]
+        )
+        base_retriever = history_vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={
+                "filter": retriever_filter,
+                "k": 20,  # 召回更多候选给 reranker
+            },
+        )
+
+        compressor.top_n = k
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, base_retriever=base_retriever
+        )
+
+        reranked_docs = compression_retriever.invoke(query)
+        hits = [d.page_content for d in reranked_docs]
+
+        return "\n".join(hits) if hits else "(无相关历史)"
+    except Exception as e:
+        msg = f"❌ Error: Could not search history. Reason: {e}"
+        print(msg)
+        return msg
 
 
 if __name__ == "__main__":
-    logging.info(
-        f"🚀 Knowledge MCP服务正在启动，监听于 http://{cfg_service['host']}:{cfg_service['port']}"
-    )
-    m.run(transport="streamable-http")
+    print("🚀 History MCP service is starting up ...")
+    m.run(transport="stdio")

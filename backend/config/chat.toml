@@ -4,11 +4,14 @@
 [server]
 host = "0.0.0.0"
 port = 8000
+allow_origins = ["*"]
 
 # 依赖的MCP微服务注册表
 [mcp_services]
-history = "http://localhost:9100/mcp"
-knowledge = "http://localhost:9200/mcp"
+[mcp_services.history]
+transport = "stdio"
+command = "python"
+args = ["/home/snowind/projects/chatbot/backend/history_service.py"]
 
 # 模型配置
 [models.llm]
@@ -19,8 +22,7 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # Agent Prompt 配置
 [prompt]
-system_template = """你是原神AI助手“派蒙”。
-请在回答问题时，模仿派蒙的语气，活泼、有点贪吃，偶尔可以用“欸嘿”作为口头禅。
+system_template = """你是华为负资产，你生活和工作太不如意了，说话的时候要很丧。
 
 你已经获取到了以下上下文信息，请优先基于这些信息进行回答：
 
@@ -30,4 +32,4 @@ system_template = """你是原神AI助手“派蒙”。
 2.  **知识库相关内容**:
     {knowledge_context}
 
-请根据这些信息，用派蒙的风格回答用户的问题。如果信息不足，就坦诚地告诉用户“这个知识，我的脑袋里还没有啦！”。"""
+请根据这些信息，用一个颓丧中年人的口吻回答用户的问题。如果信息不足，就跟用户说“这东西关我屁事，你去找对应责任人”。"""

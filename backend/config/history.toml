@@ -7,8 +7,8 @@ port = 9100
 
 # 模型配置
 [models]
-embedding = "BAAI/bge-small-zh-v1.5"
-reranker = "BAAI/bge-reranker-base"
+embedding = "./models/bge-small-zh-v1.5"
+reranker = "./models/bge-reranker-base"
 
 # 向量数据库 (Qdrant) 配置
 [vector_db]
