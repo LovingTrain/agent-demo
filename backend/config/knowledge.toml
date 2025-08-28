@@ -8,9 +8,9 @@ port = 9200
 # 模型配置
 [models]
 # 用于文本的嵌入模型
-text_embedding = "BAAI/bge-small-zh-v1.5"
+text_embedding = "./models/bge-small-zh-v1.5"
 # 用于图片的多模态模型
-image_embedding = "ViT-B/32"
+image_embedding = "./models/clip-vit-base-patch32"
 # 模型运行设备 ('cuda' or 'cpu')
 device = "cuda"
 

@@ -40,7 +40,6 @@ app_state = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("🚀 Chat service is starting up ...")
-    # ... (这部分代码保持不变)
     if CORE_DEPENDENCY not in cfg_mcp:
         raise RuntimeError(
             f"Fatal Error: core dependency '{CORE_DEPENDENCY}' is missing from [mcp_services]"

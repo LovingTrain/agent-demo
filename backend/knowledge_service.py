@@ -27,8 +27,13 @@ def build_multimodal_index():
     )
 
     # 2. 配置 embeddings
-    clip_embedding, preprocess = clip.load(name="ViT-B/32", device="cuda", jit=False)
-    text_embedding = HuggingFaceEmbedding(model_name="BAAI/bge-small-zh-v1.5")
+    clip_embedding, preprocess = clip.load(
+        name="ViT-B/32",
+        device="cuda",
+        jit=False,
+        download_root="./models/clip-vit-base-patch32",
+    )
+    text_embedding = HuggingFaceEmbedding(model_name="./models/bge-small-zh-v1.5")
 
     # 3. 自动读取所有文本和图片
     documents = SimpleDirectoryReader(DATA_DIR, recursive=True).load_data()

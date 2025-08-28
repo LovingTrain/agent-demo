@@ -102,4 +102,4 @@ def search_history(session_id: str, query: str, k: int = 3) -> str:
 
 if __name__ == "__main__":
     print("🚀 History MCP service is starting up ...")
-    m.run(transport="stdio")
+    m.run(transport="streamable-http")

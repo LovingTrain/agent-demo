@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "clip>=1.0",
     "dashscope>=1.24.0",
     "langchain-community>=0.3.27",
     "langchain-huggingface>=0.3.1",
@@ -15,6 +16,11 @@ dependencies = [
     "qdrant-client>=1.15.1",
     "sentence-transformers>=5.0.0",
     "toml>=0.10.2",
+    "llama-index-embeddings-clip>=0.5.0",
+    "llama-index-embeddings-huggingface>=0.6.0",
+    "llama-index-multi-modal-llms-openai>=0.6.0",
+    "llama-index-readers-file>=0.5.0",
+    "llama-index-vector-stores-qdrant>=0.7.1",
 ]
 
 [[tool.uv.index]]

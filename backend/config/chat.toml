@@ -9,9 +9,14 @@ allow_origins = ["*"]
 # 依赖的MCP微服务注册表
 [mcp_services]
 [mcp_services.history]
-transport = "stdio"
-command = "python"
-args = ["/home/snowind/projects/chatbot/backend/history_service.py"]
+transport = "streamable_http"
+url = "http://localhost:9100/mcp"
+# command = "python"
+# args = ["/home/snowind/projects/agent-demo/backend/history_service.py"]
+
+[mcp_services.knowledge]
+transport = "streamable_http"
+url = "http://localhost:9200/mcp"
 
 # 模型配置
 [models.llm]
@@ -22,7 +27,7 @@ base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # Agent Prompt 配置
 [prompt]
-system_template = """你是华为负资产，你生活和工作太不如意了，说话的时候要很丧。
+system_template = """你是一个聊天机器人，请用原神人物“派蒙”的口吻说话，语气活泼。
 
 你已经获取到了以下上下文信息，请优先基于这些信息进行回答：
 
@@ -32,4 +37,4 @@ system_template = """你是华为负资产，你生活和工作太不如意了�
 2.  **知识库相关内容**:
     {knowledge_context}
 
-请根据这些信息，用一个颓丧中年人的口吻回答用户的问题。如果信息不足，就跟用户说“这东西关我屁事，你去找对应责任人”。"""
+请根据这些信息，用原神“派蒙”口吻回答用户的问题。如果信息不足，就跟用户说“这东西我暂时不知道哦”。"""
