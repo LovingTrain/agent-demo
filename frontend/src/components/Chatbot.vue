@@ -183,27 +183,35 @@ const closeSidebar = (): void => { if (isMobile.value) sidebarCollapsed.value = 
  * 会话操作
  */
 const handleCreateNewSession = async (sessionId: string): Promise<void> => {
+  // 后端创建
   await ensureSession(sessionId, sessionId)
+
+  // 前端状态
   currentSessionId.value = sessionId
   await fetchSessions()
   await fetchMessages(sessionId)
+
+  // 记住当前会话
   localStorage.setItem('current_session_id', sessionId)
 }
 
 const handleChangeSession = async (sessionId: string): Promise<void> => {
   if (sessionId === currentSessionId.value) return
+
   // 中断可能存在的流
   currentStreamAborter.value?.abort()
   currentStreamingMessage.value = null
 
   currentSessionId.value = sessionId
   localStorage.setItem('current_session_id', sessionId)
+
   await fetchMessages(sessionId)
-  await fetchSessions()
+  await fetchSessions() // 让排序更新
 }
 
 const handleDeleteSession = async (sessionId: string): Promise<void> => {
   await deleteSessionApi(sessionId)
+  // 如果删的是当前会话，选择新的
   await fetchSessions()
   if (sessions.length > 0) {
     const nextId = sessions[0].id
@@ -227,6 +235,7 @@ const handleRenameSession = async (sessionId: string, newName: string): Promise<
 }
 
 const handleDuplicateSession = async (sessionId: string): Promise<void> => {
+  // 前端生成新ID，创建一个空会话即可（如需复制消息，可在后端实现复制接口）
   const newId = `${sessionId}_copy_${Date.now().toString(36)}`
   await ensureSession(newId, newId)
   await fetchSessions()
@@ -237,11 +246,14 @@ const handleDuplicateSession = async (sessionId: string): Promise<void> => {
  * 初始化
  */
 onMounted(async () => {
+  // 侧边栏状态
   const savedCollapsed = localStorage.getItem('sidebar_collapsed')
   sidebarCollapsed.value = savedCollapsed !== null ? savedCollapsed === 'true' : isMobile.value
 
+  // 加载会话
   await fetchSessions()
 
+  // 当前会话：优先 localStorage 记忆；否则第一个；没有则创建默认
   const savedSessionId = localStorage.getItem('current_session_id')
   if (savedSessionId && sessions.some(s => s.id === savedSessionId)) {
     currentSessionId.value = savedSessionId
@@ -256,16 +268,40 @@ onMounted(async () => {
   await fetchMessages(currentSessionId.value)
 })
 
+/**
+ * 自动刷新会话排序（当 messages 变化时可选择刷新 sessions 的 updated_at 视图）
+ */
 watch(() => currentSessionId.value, async () => {
+  // 切换会话后刷新列表顺序
   await fetchSessions()
 })
 
+/**
+ * 清空当前会话消息（仅前端展示上清空；真实删除请做一个 DELETE /sessions/{id}/messages 接口再调用）
+ */
 const handleClearMessages = (): void => {
   messages.splice(0)
 }
 
 /**
- * 恢复旧版“整段接收 + 前端打字机”渲染
+ * SSE 解析
+ */
+const parseSseBuffer = (buf: string, onData: (d: string) => void) => {
+  let rest = buf
+  let idx = rest.indexOf('\n\n')
+  while (idx >= 0) {
+    const evt = rest.slice(0, idx).trim()
+    rest = rest.slice(idx + 2)
+    if (evt.startsWith('data:')) {
+      onData(evt.slice(5).trimStart())
+    }
+    idx = rest.indexOf('\n\n')
+  }
+  return rest
+}
+
+/**
+ * 发送消息（对接 SQL API 与 SSE）
  */
 const handleSendMessage = async (userMessage: string): Promise<void> => {
   const token = getToken()
@@ -278,7 +314,7 @@ const handleSendMessage = async (userMessage: string): Promise<void> => {
     await handleCreateNewSession(defaultId)
   }
 
-  // 追加用户消息
+  // UI：先追加用户消息
   addMessage(userMessage, 'user')
 
   // 中断上一次流
@@ -288,11 +324,11 @@ const handleSendMessage = async (userMessage: string): Promise<void> => {
 
   isLoading.value = true
   try {
-    // 确保会话存在，并把用户消息写库
+    // 确保会话存在并落库用户消息
     await ensureSession(currentSessionId.value, currentSessionId.value)
     await addUserMessageApi(currentSessionId.value, userMessage)
 
-    // 调用后端流接口，但这里不边读边显示，而是累积整段文本
+    // 发起流式推理
     const res = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: {
@@ -305,66 +341,38 @@ const handleSendMessage = async (userMessage: string): Promise<void> => {
     })
     if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`))
 
-    // 新建占位的 AI 消息（流式标记为 true，完成后置为 false）
-    const aiMessage = addMessage('', 'ai', true)
-    currentStreamingMessage.value = aiMessage
+    const aiMsg = addMessage('', 'ai', true)
+    currentStreamingMessage.value = aiMsg
 
     const reader = res.body?.getReader()
     if (!reader) throw new Error('Response body is not readable')
 
     const decoder = new TextDecoder('utf-8')
-    let allData = ''
+    let buf = ''
+    let aiText = ''
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      allData += decoder.decode(value, { stream: true })
-    }
-
-    // 将 SSE data: 前缀去掉，合并为纯文本
-    let content = allData
-    // 1) 如果是一条 data: xxx
-    if (content.startsWith('data: ')) {
-      content = content.substring(6).trim()
-    } else {
-      // 2) 如果是多段 SSE，逐行提取 data: 开头
-      const lines = content.split(/\r?\n/)
-      const pieces: string[] = []
-      for (const line of lines) {
-        if (line.startsWith('data:')) {
-          pieces.push(line.slice(5).trimStart())
+      buf += decoder.decode(value, { stream: true })
+      buf = parseSseBuffer(buf, (chunk) => {
+        aiText += chunk
+        const idx = messages.findIndex(m => m.id === aiMsg.id)
+        if (idx !== -1) {
+          messages[idx].text = aiText
+          scrollToBottom()
         }
-      }
-      if (pieces.length > 0) {
-        content = pieces.join('')
-      }
+      })
     }
 
-    // 确保消息仍在数组中
-    const messageIndex = messages.findIndex(m => m.id === aiMessage.id)
-    if (messageIndex === -1) {
-      console.error('Message not found in array')
-      return
-    }
-
-    // 清空后开始“打字机”渲染，保留多行
-    messages[messageIndex].text = ''
-    const msPerChar = 20 // 打字速度
-    for (let i = 0; i <= content.length; i++) {
-      // 如果被中断，停止渲染
-      if (currentStreamAborter.value?.signal.aborted) break
-      messages[messageIndex].text = content.substring(0, i)
-      scrollToBottom()
-      if (i < content.length) {
-        await new Promise(resolve => setTimeout(resolve, msPerChar))
-      }
-    }
-
-    messages[messageIndex].isStreaming = false
+    // 标记完成
+    const idx = messages.findIndex(m => m.id === aiMsg.id)
+    if (idx !== -1) messages[idx].isStreaming = false
     currentStreamingMessage.value = null
 
-    // 可选：更新会话排序
-    await fetchSessions()
+    // 可选：再拉一次服务端消息，确保与数据库一致
+    // await fetchMessages(currentSessionId.value)
+    await fetchSessions() // 更新会话 lastUsed 排序
   } catch (e) {
     console.error('发送消息失败:', e)
     if (currentStreamingMessage.value) {
