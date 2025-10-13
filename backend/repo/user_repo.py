@@ -1,23 +1,33 @@
-# backend/repo/user_repo.py
-from typing import Optional, Dict, Any
-from .db import tx
+from __future__ import annotations
+from typing import Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+from .models import User
 
 
-def create_user(user_id: int, username: str, password_hash: str):
-    with tx() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT OR REPLACE INTO users (id, username, password_hash) VALUES (?, ?, ?)",
-            (user_id, username, password_hash),
-        )
+def get_by_id(db: Session, user_id: int) -> Optional[User]:
+    return db.get(User, user_id)
 
 
-def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
-    with tx() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, username, password_hash FROM users WHERE username = ?",
-            (username,),
-        )
-        row = cur.fetchone()
-        return dict(row) if row else None
+def get_by_username(db: Session, username: str) -> Optional[User]:
+    return db.execute(
+        select(User).where(User.username == username)
+    ).scalar_one_or_none()
+
+
+def upsert_user(db: Session, user_id: int, username: str, password_hash: str) -> User:
+    user = db.get(User, user_id)
+    if user:
+        user.username = username
+        user.password_hash = password_hash
+        return user
+    user = User(id=user_id, username=username, password_hash=password_hash)
+    db.add(user)
+    return user
+
+
+def create_user(db: Session, username: str, password_hash: str) -> User:
+    user = User(username=username, password_hash=password_hash)
+    db.add(user)
+    db.flush()
+    return user

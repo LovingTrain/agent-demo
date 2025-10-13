@@ -20,7 +20,7 @@ from api.session_api import router as session_router
 from service.history_service import HistoryService
 from service.session_service import SessionService
 
-from repo.db import migrate
+from repo.base import migrate
 
 
 # --- 配置 ---

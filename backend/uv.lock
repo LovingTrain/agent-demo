@@ -1073,6 +1073,7 @@ dependencies = [
     { name = "pyjwt" },
     { name = "qdrant-client" },
     { name = "sentence-transformers" },
+    { name = "sqlalchemy" },
     { name = "toml" },
 ]
 
@@ -1095,6 +1096,7 @@ requires-dist = [
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "qdrant-client", specifier = ">=1.15.1" },
     { name = "sentence-transformers", specifier = ">=5.0.0" },
+    { name = "sqlalchemy", specifier = ">=2.0.44" },
     { name = "toml", specifier = ">=0.10.2" },
 ]
 

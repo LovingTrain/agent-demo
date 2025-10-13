@@ -1,87 +1,105 @@
-# backend/repo/session_repo.py
-from typing import List, Optional, Dict, Any, Tuple
-from .db import tx
-import sqlite3
-import datetime as dt
+from __future__ import annotations
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import select, update, delete, desc
+from .models import Session as ChatSession, Message
 
 
-def upsert_session(session_id: str, user_id: int, name: Optional[str] = None) -> None:
-    now = dt.datetime.utcnow().isoformat(sep=" ", timespec="seconds")
-    with tx() as conn:
-        cur = conn.cursor()
-        # try update
-        cur.execute(
-            "UPDATE sessions SET name = COALESCE(?, name), updated_at = ? WHERE id = ? AND user_id = ?",
-            (name, now, session_id, user_id),
+def upsert_session(
+    db: Session, *, session_id: str, user_id: int, name: Optional[str] = None
+) -> ChatSession:
+    sess = db.get(ChatSession, session_id)
+    now = datetime.utcnow()
+    if sess:
+        if name:
+            sess.name = name
+        sess.updated_at = now
+        return sess
+    sess = ChatSession(
+        id=session_id,
+        user_id=user_id,
+        name=name or session_id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(sess)
+    return sess
+
+
+def list_sessions(db: Session, *, user_id: int) -> List[Dict[str, Any]]:
+    rows = (
+        db.execute(
+            select(ChatSession)
+            .where(ChatSession.user_id == user_id)
+            .order_by(desc(ChatSession.updated_at))
         )
-        if cur.rowcount == 0:
-            cur.execute(
-                "INSERT INTO sessions (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (session_id, user_id, name or session_id, now, now),
-            )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "created_at": s.created_at,
+            "updated_at": s.updated_at,
+        }
+        for s in rows
+    ]
 
 
-def list_sessions(user_id: int) -> List[Dict[str, Any]]:
-    with tx() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT id, name, created_at, updated_at FROM sessions WHERE user_id = ? ORDER BY updated_at DESC",
-            (user_id,),
+def rename_session(
+    db: Session, *, user_id: int, session_id: str, new_name: str
+) -> bool:
+    q = (
+        update(ChatSession)
+        .where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        .values(name=new_name, updated_at=datetime.utcnow())
+    )
+    res = db.execute(q)
+    return res.rowcount > 0
+
+
+def delete_session(db: Session, *, user_id: int, session_id: str) -> bool:
+    # messages 设了级联，直接删 session 即可
+    res = db.execute(
+        delete(ChatSession).where(
+            ChatSession.id == session_id, ChatSession.user_id == user_id
         )
-        return [dict(r) for r in cur.fetchall()]
-
-
-def rename_session(user_id: int, session_id: str, new_name: str) -> bool:
-    with tx() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE sessions SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
-            (new_name, session_id, user_id),
-        )
-        return cur.rowcount > 0
-
-
-def delete_session(user_id: int, session_id: str) -> bool:
-    with tx() as conn:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
-        cur.execute(
-            "DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
-        )
-        return cur.rowcount > 0
+    )
+    return res.rowcount > 0
 
 
 def add_message(
+    db: Session,
+    *,
     session_id: str,
     role: str,
     content: str,
     token_count: Optional[int] = None,
     meta: Optional[str] = None,
-) -> int:
-    with tx() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO messages (session_id, role, content, token_count, meta) VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, token_count, meta),
-        )
-        return int(cur.lastrowid)
+) -> Message:
+    msg = Message(
+        session_id=session_id,
+        role=role,
+        content=content,
+        token_count=token_count,
+        meta=meta,
+    )
+    db.add(msg)
+    db.flush()
+    return msg
 
 
 def list_messages(
-    session_id: str, limit: int = 100, before_id: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    with tx() as conn:
-        cur = conn.cursor()
-        if before_id:
-            cur.execute(
-                "SELECT id, role, content, created_at FROM messages WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ?",
-                (session_id, before_id, limit),
-            )
-        else:
-            cur.execute(
-                "SELECT id, role, content, created_at FROM messages WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-                (session_id, limit),
-            )
-        rows = cur.fetchall()
-        rows = list(reversed(rows))
-        return [dict(r) for r in rows]
+    db: Session, *, session_id: str, limit: int = 100, before_id: Optional[int] = None
+):
+    stmt = select(Message).where(Message.session_id == session_id)
+    if before_id:
+        stmt = stmt.where(Message.id < before_id)
+    rows = db.execute(stmt.order_by(desc(Message.id)).limit(limit)).scalars().all()
+    rows.reverse()
+    return [
+        {"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at}
+        for m in rows
+    ]

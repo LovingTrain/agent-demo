@@ -23,6 +23,7 @@ dependencies = [
     "llama-index-vector-stores-qdrant>=0.7.1",
     "bcrypt>=5.0.0",
     "pyjwt>=2.10.1",
+    "sqlalchemy>=2.0.44",
 ]
 
 [[tool.uv.index]]
