@@ -8,12 +8,6 @@ allow_origins = ["*"]
 
 # 依赖的MCP微服务注册表
 [mcp_services]
-[mcp_services.history]
-transport = "streamable_http"
-url = "http://localhost:9100/mcp"
-# command = "python"
-# args = ["/home/snowind/projects/agent-demo/backend/history_service.py"]
-
 [mcp_services.knowledge]
 transport = "streamable_http"
 url = "http://localhost:9200/mcp"

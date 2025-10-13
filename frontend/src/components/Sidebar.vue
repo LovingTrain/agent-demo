@@ -50,7 +50,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
             <path d="M12 5v14m7-7H5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
-          <span>新建会话</span>
+        <span>新建会话</span>
         </button>
       </div>
 
@@ -119,6 +119,18 @@
           </div>
         </div>
       </div>
+
+      <!-- 侧边栏底部：注销 -->
+      <div class="sidebar-footer">
+        <button class="logout-btn" @click="handleLogout" title="退出登录">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="margin-right:8px">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M16 17l5-5-5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          退出登录
+        </button>
+      </div>
     </div>
 
     <!-- 右键菜单 -->
@@ -156,7 +168,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import type { Session } from '@/types/chat'
 
 interface Props {
@@ -213,26 +225,17 @@ const clearSearch = () => {
   filterSessions()
 }
 
-const toggleSidebar = () => {
-  emit('toggle-sidebar')
-}
-
-const closeSidebar = () => {
-  emit('close-sidebar')
-}
+const toggleSidebar = () => emit('toggle-sidebar')
+const closeSidebar = () => emit('close-sidebar')
 
 const selectSession = (sessionId: string) => {
   emit('change-session', sessionId)
-  if (props.isMobile) {
-    closeSidebar()
-  }
+  if (props.isMobile) closeSidebar()
 }
 
 const startNewSession = () => {
   showNewSessionInput.value = true
-  nextTick(() => {
-    newSessionInputRef.value?.focus()
-  })
+  nextTick(() => newSessionInputRef.value?.focus())
 }
 
 const cancelNewSession = () => {
@@ -244,14 +247,11 @@ const cancelNewSession = () => {
 const validateNewSessionInput = () => {
   const value = newSessionId.value.trim()
   inputError.value = ''
-  
   if (value.length === 0) return
-  
   if (props.sessions.some(s => s.id === value)) {
     inputError.value = '会话名称已存在'
     return
   }
-  
   if (!/^[a-zA-Z0-9_\-\u4e00-\u9fa5\s]+$/.test(value)) {
     inputError.value = '包含无效字符'
     return
@@ -261,7 +261,6 @@ const validateNewSessionInput = () => {
 const confirmNewSession = () => {
   const sessionId = newSessionId.value.trim()
   if (!sessionId || inputError.value) return
-  
   emit('create-new-session', sessionId)
   cancelNewSession()
 }
@@ -276,17 +275,10 @@ const handleNewSessionKeyDown = (event: KeyboardEvent) => {
 }
 
 const showContextMenu = (event: MouseEvent, session: Session) => {
-  contextMenu.value = {
-    show: true,
-    x: event.clientX,
-    y: event.clientY,
-    session
-  }
+  contextMenu.value = { show: true, x: event.clientX, y: event.clientY, session }
 }
 
-const hideContextMenu = () => {
-  contextMenu.value.show = false
-}
+const hideContextMenu = () => { contextMenu.value.show = false }
 
 const renameSession = () => {
   if (!contextMenu.value.session) return
@@ -315,36 +307,32 @@ const formatSessionTime = (timestamp: Date): string => {
   const now = new Date()
   const diff = now.getTime() - timestamp.getTime()
   const hours = Math.floor(diff / (1000 * 60 * 60))
-  
   if (hours < 1) return '刚刚'
   if (hours < 24) return `${hours}小时前`
-  
   const days = Math.floor(hours / 24)
   if (days < 7) return `${days}天前`
-  
   return timestamp.toLocaleDateString('zh-CN')
 }
 
-const handleClickOutside = (event: Event) => {
-  if (contextMenu.value.show) {
-    hideContextMenu()
-  }
-}
+const handleClickOutside = () => { if (contextMenu.value.show) hideContextMenu() }
 
 onMounted(() => {
   filterSessions()
   document.addEventListener('click', handleClickOutside)
 })
+onUnmounted(() => { document.removeEventListener('click', handleClickOutside) })
 
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
-})
+watch(() => props.sessions, () => { filterSessions() }, { deep: true })
 
-// 监听 sessions 变化
-import { watch } from 'vue'
-watch(() => props.sessions, () => {
-  filterSessions()
-}, { deep: true })
+// 注销
+const handleLogout = () => {
+  // 清除本地凭证与缓存
+  localStorage.removeItem('token')
+  localStorage.removeItem('current_session_id')
+  // 如果有更多缓存，也可在此处移除
+  // 通知 App.vue 重新渲染登录页
+  window.location.reload()
+}
 </script>
 
 <style scoped>
@@ -486,9 +474,7 @@ watch(() => props.sessions, () => {
   transition: color 0.2s;
 }
 
-.clear-search-btn:hover {
-  color: #e5e5e5;
-}
+.clear-search-btn:hover { color: #e5e5e5; }
 
 /* 新建会话区域 */
 .new-session-section {
@@ -512,9 +498,7 @@ watch(() => props.sessions, () => {
   transition: all 0.2s;
 }
 
-.new-session-btn:hover {
-  background: #2563eb;
-}
+.new-session-btn:hover { background: #2563eb; }
 
 /* 创建会话区域 */
 .create-session-section {
@@ -540,13 +524,9 @@ watch(() => props.sessions, () => {
   transition: border-color 0.2s;
 }
 
-.create-input:focus {
-  border-color: #3b82f6;
-}
+.create-input:focus { border-color: #3b82f6; }
 
-.create-input::placeholder {
-  color: #666;
-}
+.create-input::placeholder { color: #666; }
 
 .confirm-btn,
 .cancel-btn {
@@ -563,29 +543,12 @@ watch(() => props.sessions, () => {
   flex-shrink: 0;
 }
 
-.confirm-btn {
-  background: #22c55e;
-  color: white;
-}
+.confirm-btn { background: #22c55e; color: white; }
+.confirm-btn:hover:not(:disabled) { background: #16a34a; }
+.confirm-btn:disabled { background: #404040; color: #666; cursor: not-allowed; }
 
-.confirm-btn:hover:not(:disabled) {
-  background: #16a34a;
-}
-
-.confirm-btn:disabled {
-  background: #404040;
-  color: #666;
-  cursor: not-allowed;
-}
-
-.cancel-btn {
-  background: #ef4444;
-  color: white;
-}
-
-.cancel-btn:hover {
-  background: #dc2626;
-}
+.cancel-btn { background: #ef4444; color: white; }
+.cancel-btn:hover { background: #dc2626; }
 
 .input-error {
   font-size: 0.75rem;
@@ -607,9 +570,7 @@ watch(() => props.sessions, () => {
   font-size: 0.875rem;
 }
 
-.sessions-list {
-  padding: 0 0.5rem;
-}
+.sessions-list { padding: 0 0.5rem; }
 
 .session-item {
   display: flex;
@@ -624,57 +585,32 @@ watch(() => props.sessions, () => {
   position: relative;
 }
 
-.session-item:hover {
-  background: #2d2d2d;
-}
+.session-item:hover { background: #2d2d2d; }
 
 .session-item.active {
   background: #1e3a8a;
   border-color: #3b82f6;
 }
 
-.session-info {
-  flex: 1;
-  min-width: 0;
-}
+.session-info { flex: 1; min-width: 0; }
 
 .session-name {
   font-size: 0.875rem;
   color: #e5e5e5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   margin-bottom: 0.25rem;
 }
 
-.session-time {
-  font-size: 0.75rem;
-  color: #888;
-}
+.session-time { font-size: 0.75rem; color: #888; }
 
-.session-actions {
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.session-item:hover .session-actions {
-  opacity: 1;
-}
+.session-actions { opacity: 0; transition: opacity 0.2s; }
+.session-item:hover .session-actions { opacity: 1; }
 
 .more-btn {
-  background: none;
-  border: none;
-  color: #888;
-  cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 0.25rem;
-  transition: all 0.2s;
+  background: none; border: none; color: #888; cursor: pointer;
+  padding: 0.25rem; border-radius: 0.25rem; transition: all 0.2s;
 }
-
-.more-btn:hover {
-  color: #e5e5e5;
-  background: #404040;
-}
+.more-btn:hover { color: #e5e5e5; background: #404040; }
 
 /* 右键菜单 */
 .context-menu {
@@ -690,65 +626,49 @@ watch(() => props.sessions, () => {
 
 .context-menu-item {
   width: 100%;
-  display: flex;
+  display: flex; align-items: center; gap: 0.5rem;
+  background: none; border: none; color: #e5e5e5;
+  padding: 0.5rem 1rem; cursor: pointer;
+  font-size: 0.875rem; transition: background 0.2s; text-align: left;
+}
+.context-menu-item:hover { background: #404040; }
+.context-menu-item.danger { color: #ef4444; }
+.context-menu-item.danger:hover { background: #ef4444; color: white; }
+.context-menu-divider { height: 1px; background: #404040; margin: 0.5rem 0; }
+
+/* 底部注销 */
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.logout-btn {
+  width: 100%;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  background: none;
-  border: none;
+  justify-content: center;
+  gap: 6px;
+  background: #202225;
   color: #e5e5e5;
-  padding: 0.5rem 1rem;
+  border: 1px solid #333;
+  padding: 10px 12px;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 0.875rem;
-  transition: background 0.2s;
-  text-align: left;
+  transition: background .2s, border-color .2s, transform .02s;
 }
-
-.context-menu-item:hover {
-  background: #404040;
-}
-
-.context-menu-item.danger {
-  color: #ef4444;
-}
-
-.context-menu-item.danger:hover {
-  background: #ef4444;
-  color: white;
-}
-
-.context-menu-divider {
-  height: 1px;
-  background: #404040;
-  margin: 0.5rem 0;
-}
+.logout-btn:hover { background: #2a2d31; border-color: #3a3f45; }
+.logout-btn:active { transform: translateY(1px); }
 
 /* 滚动条样式 */
-.sessions-section::-webkit-scrollbar {
-  width: 6px;
-}
-
-.sessions-section::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.sessions-section::-webkit-scrollbar-thumb {
-  background: #404040;
-  border-radius: 3px;
-}
-
-.sessions-section::-webkit-scrollbar-thumb:hover {
-  background: #555;
-}
+.sessions-section::-webkit-scrollbar { width: 6px; }
+.sessions-section::-webkit-scrollbar-track { background: transparent; }
+.sessions-section::-webkit-scrollbar-thumb { background: #404040; border-radius: 3px; }
+.sessions-section::-webkit-scrollbar-thumb:hover { background: #555; }
 
 /* 响应式设计 */
 @media (max-width: 768px) {
-  .sidebar {
-    width: 300px;
-  }
-  
-  .sidebar.collapsed {
-    width: 0;
-    overflow: hidden;
-  }
+  .sidebar { width: 300px; }
+  .sidebar.collapsed { width: 0; overflow: hidden; }
 }
 </style>

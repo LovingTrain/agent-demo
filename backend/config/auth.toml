@@ -1,0 +1,14 @@
+# config/auth.toml
+
+# 用户文件路径（演示版，生产建议改为数据库）
+users_file = "config/users.toml"
+
+# JWT 配置
+jwt_secret = "a-strong-secret" # 请使用强随机值或从环境变量注入
+jwt_expire_minutes = 60
+
+# 开发用 API Key（仅演示，生产不要明文存储）
+api_keys = ["sk-demo-123"]
+
+# 使用 API Key 调用时映射到的默认用户ID（0 表示系统用户/匿名）
+default_api_user_id = 0

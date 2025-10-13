@@ -13,7 +13,7 @@
       @toggle-sidebar="toggleSidebar"
       @close-sidebar="closeSidebar"
     />
-    
+
     <div class="main-content">
       <ChatHeader
         :current-session-id="currentSessionId"
@@ -21,14 +21,14 @@
         :is-mobile="isMobile"
         @toggle-sidebar="toggleSidebar"
       />
-      
+
       <ChatMessages
         ref="chatMessagesRef"
         :messages="messages"
         :is-loading="isLoading"
         :current-streaming-message="currentStreamingMessage"
       />
-      
+
       <ChatInput
         :is-loading="isLoading"
         @send-message="handleSendMessage"
@@ -40,13 +40,38 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, computed, type Ref } from 'vue'
-import type { Message, ChatRequest, Session } from '@/types/chat'
 import Sidebar from './Sidebar.vue'
 import ChatHeader from './ChatHeader.vue'
 import ChatMessages from './ChatMessages.vue'
 import ChatInput from './ChatInput.vue'
+import type { Message, Session } from '@/types/chat'
 import 'highlight.js/styles/atom-one-dark.css'
 
+/**
+ * 配置与鉴权
+ */
+const API_BASE = import.meta.env.VITE_API_BASE || ''
+const getToken = () => localStorage.getItem('token') || ''
+
+async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+      'Authorization': `Bearer ${getToken()}`
+    }
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  return res.json() as Promise<T>
+}
+
+/**
+ * 组件状态
+ */
 const messages = reactive<Message[]>([])
 const sessions = reactive<Session[]>([])
 const isLoading = ref<boolean>(false)
@@ -54,250 +79,18 @@ const currentSessionId = ref<string>('')
 const currentStreamingMessage = ref<Message | null>(null)
 const chatMessagesRef: Ref<any> = ref(null)
 const sidebarCollapsed = ref<boolean>(false)
+const currentStreamAborter = ref<AbortController | null>(null)
 
-// 检测移动端
 const isMobile = computed(() => {
   if (typeof window === 'undefined') return false
   return window.innerWidth <= 768
 })
 
-// 生成唯一ID
-const generateId = (): string => {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2)
-}
-
-// 生成默认会话ID
-const generateDefaultSessionId = (): string => {
-  return 'chat_' + Date.now().toString(36)
-}
-
-// 侧边栏控制
-const toggleSidebar = (): void => {
-  sidebarCollapsed.value = !sidebarCollapsed.value
-  localStorage.setItem('sidebar_collapsed', sidebarCollapsed.value.toString())
-}
-
-const closeSidebar = (): void => {
-  if (isMobile.value) {
-    sidebarCollapsed.value = true
-  }
-}
-
-// 创建新会话
-const handleCreateNewSession = (sessionId: string): void => {
-  if (sessions.some(s => s.id === sessionId)) {
-    console.error('会话ID已存在')
-    return
-  }
-  
-  saveCurrentSession()
-  
-  currentSessionId.value = sessionId
-  messages.splice(0)
-  
-  const newSession: Session = {
-    id: sessionId,
-    name: sessionId,
-    createdAt: new Date(),
-    lastUsed: new Date()
-  }
-  
-  sessions.unshift(newSession)
-  localStorage.setItem('chat_sessions', JSON.stringify(sessions))
-}
-
-// 切换会话
-const handleChangeSession = (sessionId: string): void => {
-  if (sessionId === currentSessionId.value) return
-  
-  saveCurrentSession()
-  currentSessionId.value = sessionId
-  messages.splice(0)
-  loadSessionMessages(sessionId)
-  updateSessionLastUsed(sessionId)
-}
-
-// 删除会话
-const handleDeleteSession = (sessionId: string): void => {
-  const index = sessions.findIndex(s => s.id === sessionId)
-  if (index > -1) {
-    sessions.splice(index, 1)
-    localStorage.removeItem(`chat_messages_${sessionId}`)
-    
-    if (sessionId === currentSessionId.value) {
-      if (sessions.length > 0) {
-        handleChangeSession(sessions[0].id)
-      } else {
-        const defaultSessionId = generateDefaultSessionId()
-        handleCreateNewSession(defaultSessionId)
-      }
-    }
-    
-    localStorage.setItem('chat_sessions', JSON.stringify(sessions))
-  }
-}
-
-// 重命名会话
-const handleRenameSession = (sessionId: string, newName: string): void => {
-  const sessionIndex = sessions.findIndex(s => s.id === sessionId)
-  if (sessionIndex > -1) {
-    // 检查新名称是否已存在
-    if (sessions.some(s => s.id === newName && s.id !== sessionId)) {
-      alert('会话名称已存在')
-      return
-    }
-    
-    const oldSessionId = sessions[sessionIndex].id
-    
-    // 更新会话信息
-    sessions[sessionIndex].id = newName
-    sessions[sessionIndex].name = newName
-    
-    // 更新存储
-    const oldMessages = localStorage.getItem(`chat_messages_${oldSessionId}`)
-    if (oldMessages) {
-      localStorage.setItem(`chat_messages_${newName}`, oldMessages)
-      localStorage.removeItem(`chat_messages_${oldSessionId}`)
-    }
-    
-    // 如果是当前会话，更新当前会话ID
-    if (currentSessionId.value === oldSessionId) {
-      currentSessionId.value = newName
-    }
-    
-    localStorage.setItem('chat_sessions', JSON.stringify(sessions))
-  }
-}
-
-// 复制会话
-const handleDuplicateSession = (sessionId: string): void => {
-  const session = sessions.find(s => s.id === sessionId)
-  if (!session) return
-  
-  const newSessionId = `${sessionId}_copy_${Date.now().toString(36)}`
-  const savedMessages = localStorage.getItem(`chat_messages_${sessionId}`)
-  
-  // 创建新会话
-  const newSession: Session = {
-    id: newSessionId,
-    name: newSessionId,
-    createdAt: new Date(),
-    lastUsed: new Date()
-  }
-  
-  sessions.unshift(newSession)
-  
-  // 复制消息
-  if (savedMessages) {
-    localStorage.setItem(`chat_messages_${newSessionId}`, savedMessages)
-  }
-  
-  localStorage.setItem('chat_sessions', JSON.stringify(sessions))
-  
-  // 切换到新会话
-  handleChangeSession(newSessionId)
-}
-
-// 更新会话最后使用时间
-const updateSessionLastUsed = (sessionId: string): void => {
-  const sessionIndex = sessions.findIndex(s => s.id === sessionId)
-  if (sessionIndex > -1) {
-    sessions[sessionIndex].lastUsed = new Date()
-    const session = sessions.splice(sessionIndex, 1)[0]
-    sessions.unshift(session)
-    localStorage.setItem('chat_sessions', JSON.stringify(sessions))
-  }
-}
-
-// 保存当前会话
-const saveCurrentSession = (): void => {
-  if (!currentSessionId.value) return
-  
-  localStorage.setItem(`chat_messages_${currentSessionId.value}`, JSON.stringify(messages))
-  
-  const existingIndex = sessions.findIndex(s => s.id === currentSessionId.value)
-  if (existingIndex > -1) {
-    sessions[existingIndex].lastUsed = new Date()
-    const session = sessions.splice(existingIndex, 1)[0]
-    sessions.unshift(session)
-  } else if (messages.length > 0) {
-    const sessionData: Session = {
-      id: currentSessionId.value,
-      name: currentSessionId.value,
-      createdAt: new Date(),
-      lastUsed: new Date()
-    }
-    sessions.unshift(sessionData)
-  }
-  
-  localStorage.setItem('chat_sessions', JSON.stringify(sessions))
-}
-
-// 加载会话消息
-const loadSessionMessages = (sessionId: string): void => {
-  const savedMessages = localStorage.getItem(`chat_messages_${sessionId}`)
-  if (savedMessages) {
-    try {
-      const parsedMessages = JSON.parse(savedMessages)
-      messages.splice(0, messages.length, ...parsedMessages.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-        isStreaming: false
-      })))
-      scrollToBottom()
-    } catch (error) {
-      console.error('Failed to load session messages:', error)
-    }
-  }
-}
-
-// 初始化
-onMounted(() => {
-  // 加载侧边栏状态
-  const savedCollapsed = localStorage.getItem('sidebar_collapsed')
-  if (savedCollapsed !== null) {
-    sidebarCollapsed.value = savedCollapsed === 'true'
-  } else {
-    // 移动端默认收起
-    sidebarCollapsed.value = isMobile.value
-  }
-  
-  // 加载会话列表
-  const savedSessions = localStorage.getItem('chat_sessions')
-  if (savedSessions) {
-    try {
-      const parsedSessions = JSON.parse(savedSessions)
-      sessions.splice(0, sessions.length, ...parsedSessions.map((session: any) => ({
-        ...session,
-        createdAt: new Date(session.createdAt),
-        lastUsed: new Date(session.lastUsed)
-      })))
-      sessions.sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime())
-    } catch (error) {
-      console.error('Failed to load sessions:', error)
-    }
-  }
-  
-  // 设置当前会话
-  if (sessions.length > 0) {
-    currentSessionId.value = sessions[0].id
-    loadSessionMessages(sessions[0].id)
-  } else {
-    const defaultSessionId = generateDefaultSessionId()
-    handleCreateNewSession(defaultSessionId)
-  }
-})
-
-// 监听消息变化并自动保存
-let saveTimeout: any = null
-watch(messages, () => {
-  if (currentSessionId.value && messages.length > 0) {
-    clearTimeout(saveTimeout)
-    saveTimeout = setTimeout(() => {
-      saveCurrentSession()
-    }, 1000)
-  }
-}, { deep: true })
+/**
+ * 工具函数
+ */
+const generateId = (): string => Date.now().toString(36) + Math.random().toString(36).slice(2)
+const generateDefaultSessionId = (): string => 'chat_' + Date.now().toString(36)
 
 const scrollToBottom = (): void => {
   if (chatMessagesRef.value) {
@@ -318,102 +111,283 @@ const addMessage = (text: string, type: 'user' | 'ai', isStreaming = false): Mes
   return message
 }
 
-const handleClearMessages = (): void => {
+function replaceMessagesFromServer(rows: Array<{ id: number; role: string; content: string; created_at: string }>) {
   messages.splice(0)
-  localStorage.removeItem(`chat_messages_${currentSessionId.value}`)
+  for (const r of rows) {
+    messages.push({
+      id: String(r.id),
+      text: r.content,
+      type: r.role === 'user' ? 'user' : 'ai',
+      timestamp: new Date(r.created_at),
+      isStreaming: false
+    })
+  }
+  scrollToBottom()
 }
 
-const handleSendMessage = async (userMessage: string): Promise<void> => {
-  // 添加用户消息
-  addMessage(userMessage, 'user')
-  
-  isLoading.value = true
-  
-  try {
-    const requestBody: ChatRequest = {
-      input: userMessage,
-      session_id: currentSessionId.value
-    }
+/**
+ * 后端 API 封装：会话与消息
+ */
+async function ensureSession(sessionId: string, name?: string) {
+  await api('/sessions', { method: 'POST', body: JSON.stringify({ id: sessionId, name: name || sessionId }) })
+}
 
-    const response = await fetch('/chat/stream', {
+async function fetchSessions() {
+  const data = await api<Array<{ id: string; name: string; created_at: string; updated_at: string }>>('/sessions')
+  sessions.splice(0)
+  sessions.push(
+    ...data.map((s) => ({
+      id: s.id,
+      name: s.name,
+      createdAt: new Date(s.created_at),
+      lastUsed: new Date(s.updated_at)
+    }))
+  )
+}
+
+async function fetchMessages(sessionId: string) {
+  const data = await api<Array<{ id: number; role: string; content: string; created_at: string }>>(
+    `/sessions/${encodeURIComponent(sessionId)}/messages`
+  )
+  replaceMessagesFromServer(data)
+}
+
+async function renameSessionApi(sessionId: string, newName: string) {
+  await api(`/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: newName })
+  })
+}
+
+async function deleteSessionApi(sessionId: string) {
+  await api(`/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' })
+}
+
+async function addUserMessageApi(sessionId: string, content: string) {
+  await api(`/sessions/${encodeURIComponent(sessionId)}/messages/user`, {
+    method: 'POST',
+    body: JSON.stringify({ content })
+  })
+}
+
+/**
+ * 侧边栏控制
+ */
+const toggleSidebar = (): void => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem('sidebar_collapsed', sidebarCollapsed.value.toString())
+}
+const closeSidebar = (): void => { if (isMobile.value) sidebarCollapsed.value = true }
+
+/**
+ * 会话操作
+ */
+const handleCreateNewSession = async (sessionId: string): Promise<void> => {
+  // 后端创建
+  await ensureSession(sessionId, sessionId)
+
+  // 前端状态
+  currentSessionId.value = sessionId
+  await fetchSessions()
+  await fetchMessages(sessionId)
+
+  // 记住当前会话
+  localStorage.setItem('current_session_id', sessionId)
+}
+
+const handleChangeSession = async (sessionId: string): Promise<void> => {
+  if (sessionId === currentSessionId.value) return
+
+  // 中断可能存在的流
+  currentStreamAborter.value?.abort()
+  currentStreamingMessage.value = null
+
+  currentSessionId.value = sessionId
+  localStorage.setItem('current_session_id', sessionId)
+
+  await fetchMessages(sessionId)
+  await fetchSessions() // 让排序更新
+}
+
+const handleDeleteSession = async (sessionId: string): Promise<void> => {
+  await deleteSessionApi(sessionId)
+  // 如果删的是当前会话，选择新的
+  await fetchSessions()
+  if (sessions.length > 0) {
+    const nextId = sessions[0].id
+    currentSessionId.value = nextId
+    localStorage.setItem('current_session_id', nextId)
+    await fetchMessages(nextId)
+  } else {
+    const defaultId = generateDefaultSessionId()
+    await handleCreateNewSession(defaultId)
+  }
+}
+
+const handleRenameSession = async (sessionId: string, newName: string): Promise<void> => {
+  await renameSessionApi(sessionId, newName)
+  await fetchSessions()
+  if (currentSessionId.value === sessionId) {
+    currentSessionId.value = newName
+    localStorage.setItem('current_session_id', newName)
+    await fetchMessages(newName)
+  }
+}
+
+const handleDuplicateSession = async (sessionId: string): Promise<void> => {
+  // 前端生成新ID，创建一个空会话即可（如需复制消息，可在后端实现复制接口）
+  const newId = `${sessionId}_copy_${Date.now().toString(36)}`
+  await ensureSession(newId, newId)
+  await fetchSessions()
+  await handleChangeSession(newId)
+}
+
+/**
+ * 初始化
+ */
+onMounted(async () => {
+  // 侧边栏状态
+  const savedCollapsed = localStorage.getItem('sidebar_collapsed')
+  sidebarCollapsed.value = savedCollapsed !== null ? savedCollapsed === 'true' : isMobile.value
+
+  // 加载会话
+  await fetchSessions()
+
+  // 当前会话：优先 localStorage 记忆；否则第一个；没有则创建默认
+  const savedSessionId = localStorage.getItem('current_session_id')
+  if (savedSessionId && sessions.some(s => s.id === savedSessionId)) {
+    currentSessionId.value = savedSessionId
+  } else if (sessions.length > 0) {
+    currentSessionId.value = sessions[0].id
+  } else {
+    const defaultId = generateDefaultSessionId()
+    await handleCreateNewSession(defaultId)
+    return
+  }
+
+  await fetchMessages(currentSessionId.value)
+})
+
+/**
+ * 自动刷新会话排序（当 messages 变化时可选择刷新 sessions 的 updated_at 视图）
+ */
+watch(() => currentSessionId.value, async () => {
+  // 切换会话后刷新列表顺序
+  await fetchSessions()
+})
+
+/**
+ * 清空当前会话消息（仅前端展示上清空；真实删除请做一个 DELETE /sessions/{id}/messages 接口再调用）
+ */
+const handleClearMessages = (): void => {
+  messages.splice(0)
+}
+
+/**
+ * SSE 解析
+ */
+const parseSseBuffer = (buf: string, onData: (d: string) => void) => {
+  let rest = buf
+  let idx = rest.indexOf('\n\n')
+  while (idx >= 0) {
+    const evt = rest.slice(0, idx).trim()
+    rest = rest.slice(idx + 2)
+    if (evt.startsWith('data:')) {
+      onData(evt.slice(5).trimStart())
+    }
+    idx = rest.indexOf('\n\n')
+  }
+  return rest
+}
+
+/**
+ * 发送消息（对接 SQL API 与 SSE）
+ */
+const handleSendMessage = async (userMessage: string): Promise<void> => {
+  const token = getToken()
+  if (!token) {
+    alert('请先登录或设置 API Key')
+    return
+  }
+  if (!currentSessionId.value) {
+    const defaultId = generateDefaultSessionId()
+    await handleCreateNewSession(defaultId)
+  }
+
+  // UI：先追加用户消息
+  addMessage(userMessage, 'user')
+
+  // 中断上一次流
+  currentStreamAborter.value?.abort()
+  currentStreamAborter.value = new AbortController()
+  const signal = currentStreamAborter.value.signal
+
+  isLoading.value = true
+  try {
+    // 确保会话存在并落库用户消息
+    await ensureSession(currentSessionId.value, currentSessionId.value)
+    await addUserMessageApi(currentSessionId.value, userMessage)
+
+    // 发起流式推理
+    const res = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({ input: userMessage, session_id: currentSessionId.value }),
+      signal
     })
+    if (!res.ok) throw new Error(await res.text().catch(() => `HTTP ${res.status}`))
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
+    const aiMsg = addMessage('', 'ai', true)
+    currentStreamingMessage.value = aiMsg
 
-    // 创建AI回复消息
-    const aiMessage = addMessage('', 'ai', true)
-    currentStreamingMessage.value = aiMessage
-    
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('Response body is not readable')
-    }
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('Response body is not readable')
 
-    const decoder = new TextDecoder()
-    let allData = ''
+    const decoder = new TextDecoder('utf-8')
+    let buf = ''
+    let aiText = ''
 
-    // 读取所有数据
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      allData += decoder.decode(value, { stream: true })
+      buf += decoder.decode(value, { stream: true })
+      buf = parseSseBuffer(buf, (chunk) => {
+        aiText += chunk
+        const idx = messages.findIndex(m => m.id === aiMsg.id)
+        if (idx !== -1) {
+          messages[idx].text = aiText
+          scrollToBottom()
+        }
+      })
     }
 
-    console.log('接收到的完整数据:', allData)
-
-    // 提取内容
-    let content = allData
-    if (content.startsWith('data: ')) {
-      content = content.substring(6).trim()
-    }
-
-    console.log('提取的内容:', content)
-    console.log('内容长度:', content.length)
-
-    // 确保 aiMessage 还在 messages 数组中
-    const messageIndex = messages.findIndex(m => m.id === aiMessage.id)
-    if (messageIndex === -1) {
-      console.error('Message not found in array')
-      return
-    }
-
-    // 直接在 messages 数组中更新，模拟打字效果
-    messages[messageIndex].text = ''
-    
-    for (let i = 0; i <= content.length; i++) {
-      messages[messageIndex].text = content.substring(0, i)
-      scrollToBottom()
-      if (i < content.length) {
-        await new Promise(resolve => setTimeout(resolve, 20))
-      }
-    }
-    
-    // 完成
-    messages[messageIndex].isStreaming = false
+    // 标记完成
+    const idx = messages.findIndex(m => m.id === aiMsg.id)
+    if (idx !== -1) messages[idx].isStreaming = false
     currentStreamingMessage.value = null
-    
-  } catch (error) {
-    console.error('发送消息失败:', error)
+
+    // 可选：再拉一次服务端消息，确保与数据库一致
+    // await fetchMessages(currentSessionId.value)
+    await fetchSessions() // 更新会话 lastUsed 排序
+  } catch (e) {
+    console.error('发送消息失败:', e)
     if (currentStreamingMessage.value) {
-      const messageIndex = messages.findIndex(m => m.id === currentStreamingMessage.value!.id)
-      if (messageIndex > -1) {
-        messages[messageIndex].text = '抱歉，发送消息时出现错误，请稍后重试。'
-        messages[messageIndex].isStreaming = false
+      const i = messages.findIndex(m => m.id === currentStreamingMessage.value!.id)
+      if (i > -1) {
+        messages[i].text = '抱歉，发送消息时出现错误，请稍后重试。'
+        messages[i].isStreaming = false
       }
     }
     currentStreamingMessage.value = null
   } finally {
     isLoading.value = false
+    currentStreamAborter.value = null
   }
 }
-
 </script>
 
 <style scoped>

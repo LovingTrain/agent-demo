@@ -1,0 +1,15 @@
+[users.admin]
+id = 1
+password_hash = "$2b$12$abcdefghijklmnoEXAMPLEEXAMPLEEXAMPLEqwertyuiop"
+
+[users.tester1]
+id = 2
+password_hash = "$2b$12$7b4D8ewYDS3xi3hMz0Zx6.QqlXCAKSSueKOxujlZjcUpod5SNjF1e"
+
+[users.tester2]
+id = 3
+password_hash = "$2b$12$dt0U3biE5NixN1lc5rJee.60NR8b5j4EfqwPUdLF3z.9xEmxyv7eO"
+
+[users.hello]
+id = 4
+password_hash = "$2b$12$baX7hysYccK7qBK4CDYvne1G2TnlTXTGTBGMqZPXFuqdiUJ6LWQCC"
